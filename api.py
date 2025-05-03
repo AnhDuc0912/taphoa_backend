@@ -1,14 +1,12 @@
 from flask import Flask, request, jsonify
 import os
+import mysql.connector
+from model_utils import extract_features, load_or_generate_features
+from fine_tune import fine_tune_model_with_new_data
 import torch
-import torch.nn as nn
-from torchvision import models, transforms
-from PIL import Image
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-from tqdm import tqdm
-import pickle
-import mysql.connector
+import requests
 
 app = Flask(__name__)
 
@@ -29,137 +27,12 @@ def get_db_connection():
 
 # ----- Cấu hình -----
 IMAGE_DATA = './static'
-MODEL_PATH = './best_model_updated.pt'
-FEATURES_CACHE = './features.pkl'
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 DB_CONFIG = {
     'host': 'localhost',
     'user': 'root',
     'password': 'mysql',
     'database': 'taphoa_hango'
 }
-
-# ----- Tiền xử lý ảnh -----
-TRANSFORM = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-])
-
-# ----- Load mô hình -----
-model = models.resnet18(pretrained=False)
-model.fc = nn.Linear(model.fc.in_features, 11)
-model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-model.to(DEVICE)
-model.eval()
-
-# ----- Load class names từ bảng categories -----
-def load_class_names():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT label FROM categories ORDER BY id")
-    class_names = [row[0] for row in cursor.fetchall()]
-    conn.close()
-    return class_names
-
-class_names = load_class_names()
-
-# ----- Hàm trích xuất vector đặc trưng và dự đoán nhãn -----
-def extract_features(image_path):
-    image = Image.open(image_path).convert("RGB")
-    image = TRANSFORM(image).unsqueeze(0).to(DEVICE)
-    with torch.no_grad():
-        feature_extractor = nn.Sequential(*list(model.children())[:-1])
-        features = feature_extractor(image).flatten()
-        output = model(image)
-        pred_class = torch.argmax(output, dim=1).item()
-    return features.cpu().numpy(), pred_class
-
-# ----- Load hoặc tạo đặc trưng từ CSDL -----
-def load_or_generate_features():
-    if os.path.exists(FEATURES_CACHE):
-        try:
-            with open(FEATURES_CACHE, 'rb') as f:
-                data = pickle.load(f)
-                if not isinstance(data, dict) or 'sources' not in data:
-                    print("⚠️ File cache không chứa 'sources', đang xóa và tạo lại...")
-                    os.remove(FEATURES_CACHE)
-                else:
-                    print("✅ Đang nạp đặc trưng từ file cache...")
-                    return data
-        except Exception as e:
-            print(f"⚠️ Lỗi khi đọc file cache: {e}, đang xóa và tạo lại...")
-            os.remove(FEATURES_CACHE)
-
-    print("📦 Trích xuất đặc trưng từ CSDL...")
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    query_products = """
-        SELECT p.image_path, p.product_id, c.label
-        FROM products p
-        JOIN categories c ON p.category_id = c.id
-        WHERE p.image_path IS NOT NULL AND p.image_path != ''
-    """
-    cursor.execute(query_products)
-    products_rows = cursor.fetchall()
-
-    query_images = """
-        SELECT pi.image_path, pi.product_id, c.label
-        FROM product_images pi
-        JOIN products p ON pi.product_id = p.product_id
-        JOIN categories c ON p.category_id = c.id
-    """
-    cursor.execute(query_images)
-    images_rows = cursor.fetchall()
-
-    conn.close()
-
-    features_list = []
-    paths_list = []
-    labels_list = []
-    sources_list = []
-
-    for row in tqdm(products_rows, desc="Đang xử lý hình ảnh từ products", unit=" ảnh"):
-        print(row['label'])
-        img_path = os.path.join(IMAGE_DATA, row['label'], row['image_path'])
-        if not os.path.exists(img_path):
-            print(f"⚠️ Không tìm thấy file: {img_path}")
-            continue
-        try:
-            feat, _ = extract_features(img_path)
-            features_list.append(feat)
-            paths_list.append(row['image_path'])
-            labels_list.append(row['label'])
-            sources_list.append('products')
-        except Exception as e:
-            print(f"Lỗi với {img_path}: {e}")
-
-    for row in tqdm(images_rows, desc="Đang xử lý hình ảnh từ product_images", unit=" ảnh"):
-        print(row['label'])
-        img_path = os.path.join(IMAGE_DATA, row['label'], row['image_path'])
-        if not os.path.exists(img_path):
-            print(f"⚠️ Không tìm thấy file: {img_path}")
-            continue
-        try:
-            feat, _ = extract_features(img_path)
-            features_list.append(feat)
-            paths_list.append(row['image_path'])
-            labels_list.append(row['label'])
-            sources_list.append('product_images')
-        except Exception as e:
-            print(f"Lỗi với {img_path}: {e}")
-
-    cache_data = {
-        'features': np.array(features_list),
-        'paths': paths_list,
-        'labels': labels_list,
-        'sources': sources_list
-    }
-    with open(FEATURES_CACHE, 'wb') as f:
-        pickle.dump(cache_data, f)
-    print("💾 Đã lưu đặc trưng vào file.")
-    return cache_data
 
 # ----- Hàm lấy sản phẩm từ top_indices -----
 def get_products_from_indices(top_indices, class_paths, class_sources, similarities, data, start_idx, num_items):
@@ -235,6 +108,7 @@ def get_similar_images():
             os.remove(temp_path)
             return jsonify({'error': f'Failed to extract features from image: {str(e)}'}), 500
 
+        from model_utils import class_names
         if pred_class < 0 or pred_class >= len(class_names):
             os.remove(temp_path)
             return jsonify({'error': f'Invalid predicted class index: {pred_class}'}), 500
@@ -276,11 +150,11 @@ def get_similar_images():
 
         # Lưu kết quả tìm kiếm vào biến toàn cục
         search_results = {
-            'top_indices': top_indices.tolist(),  # Chuyển NumPy array thành list để tránh lỗi
-            'similarities': similarities.tolist(),  # Chuyển NumPy array thành list
+            'top_indices': top_indices.tolist(),
+            'similarities': similarities.tolist(),
             'class_paths': class_paths,
             'class_sources': class_sources,
-            'class_features': class_features.tolist(),  # Chuyển NumPy array thành list
+            'class_features': class_features.tolist(),
             'predicted_label': predicted_label,
             'data': data
         }
@@ -308,20 +182,16 @@ def get_similar_images():
 def load_more_similar():
     global search_results
     try:
-        # Lấy dữ liệu từ body
         body = request.get_json()
         if not body:
             return jsonify({'error': 'Request body must be JSON'}), 400
 
-        # Lấy offset từ body (mặc định là 5 nếu không có)
         offset = body.get('offset', 5)
         if not isinstance(offset, int) or offset < 0:
             return jsonify({'error': 'Offset must be a non-negative integer'}), 400
 
         num_items = 5
 
-        # Kiểm tra xem có kết quả tìm kiếm trước đó không
-        # Sử dụng len() thay vì kiểm tra trực tiếp giá trị logic của mảng
         if len(search_results['top_indices']) == 0:
             return jsonify({'error': 'No previous search results found. Please run a search first.'}), 400
 
@@ -331,11 +201,9 @@ def load_more_similar():
         class_sources = search_results['class_sources']
         data = search_results['data']
 
-        # Kiểm tra xem còn sản phẩm để load không
         if offset >= len(top_indices):
             return jsonify({'error': 'No more products to load'}), 404
 
-        # Lấy 5 sản phẩm tiếp theo
         similar_products = get_products_from_indices(
             top_indices, class_paths, class_sources, similarities, data, start_idx=offset, num_items=num_items
         )
@@ -348,6 +216,138 @@ def load_more_similar():
 
     except Exception as e:
         return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
+
+# ----- API thêm sản phẩm mới -----
+@app.route('/api/add-product', methods=['POST'])
+def add_product():
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'Missing image file'}), 400
+
+        image_file = request.files['image']
+        if not image_file or image_file.filename == '':
+            return jsonify({'error': 'No image file provided'}), 400
+
+        # Lấy dữ liệu từ form
+        category_id = request.form.get('category_id')
+        product_name = request.form.get('product_name')
+        price = request.form.get('price')
+        unit = request.form.get('unit')
+
+        # Kiểm tra dữ liệu bắt buộc
+        if not all([category_id, product_name, price, unit]):
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        # Gọi hàm upload_image để lưu ảnh
+        label = 'uncategorized'  # default value nếu không có category_id
+
+        if category_id:
+            from model_utils import class_names
+            label = class_names[int(category_id) - 1]
+
+        image_path = f"{image_file.filename}_{int(torch.randint(0, 1000, (1,)).item())}.jpg"
+        save_path = upload_image(label, image_file, image_path)  # Sử dụng hàm upload_image
+
+        # Lưu vào CSDL
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        product_query = """
+            INSERT INTO products (product_name, category_id, price, unit, image_path)
+            VALUES (%s, %s, %s, %s, %s)
+        """
+        cursor.execute(product_query, (
+            product_name,
+            category_id,
+            price,
+            unit,
+            image_path
+        ))
+        product_id = cursor.lastrowid
+
+        conn.commit()
+        conn.close()
+
+        update_features_and_finetune(save_path, label, image_path, int(category_id))
+
+        return jsonify({
+            'message': 'Product added successfully',
+            'product_id': product_id,
+            'category_id': category_id,
+            'image_path': label + "/" + image_path
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to add product: {str(e)}'}), 500
+
+# Upload ảnh
+@app.route('/api/upload-image', methods=['POST'])
+def upload_image():
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'Missing image file'}), 400
+
+        image_file = request.files['image']
+        category_id = request.form.get('category_id', default=None, type=int)
+
+        if not image_file or image_file.filename == '':
+            return jsonify({'error': 'No image file provided'}), 400
+
+        # Xác định nhãn nếu có
+        label = 'uncategorized'
+        if category_id is not None:
+            from model_utils import class_names
+            label = class_names[category_id]
+
+        image_path = f"{image_file.filename}_{int(torch.randint(0, 1000, (1,)).item())}.jpg"
+        save_path = os.path.join(IMAGE_DATA, label, image_path)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        image_file.save(save_path)
+
+        return jsonify({
+            'message': 'Image uploaded successfully',
+            'image_path': image_path,
+            'category_label': label
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to upload image: {str(e)}'}), 500
+
+def upload_image(label, image_file, image_path):
+    try:
+        # Xác định đường dẫn lưu ảnh
+        save_dir = os.path.join(IMAGE_DATA, label)
+        os.makedirs(save_dir, exist_ok=True)  # Tạo thư mục nếu chưa tồn tại
+
+        # Đường dẫn tệp lưu ảnh
+        save_path = os.path.join(save_dir, image_path)
+        
+        # Lưu ảnh vào hệ thống
+        image_file.save(save_path)
+
+        return save_path  # Trả về đường dẫn đã lưu ảnh
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to upload image: {str(e)}'}), 500
+
+# ----- Hàm cập nhật đặc trưng và fine-tune mô hình sau khi thêm sản phẩm -----
+def update_features_and_finetune(image_path, label, image_path_in_db, category_id):
+    from model_utils import FEATURES_CACHE
+    import pickle
+
+    new_feature, _ = extract_features(image_path)
+    data = load_or_generate_features()
+
+    data['features'] = np.vstack([data['features'], new_feature])
+    data['paths'].append(image_path_in_db)
+    data['labels'].append(label)
+    data['sources'].append('products')
+
+    with open(FEATURES_CACHE, 'wb') as f:
+        pickle.dump(data, f)
+    print("💾 Đã cập nhật đặc trưng vào file cache.")
+
+    fine_tune_model_with_new_data([image_path], [category_id])
 
 # ----- Thực thi -----
 if __name__ == "__main__":
