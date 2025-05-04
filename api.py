@@ -182,15 +182,12 @@ def get_similar_images():
 def load_more_similar():
     global search_results
     try:
-        body = request.get_json()
-        if not body:
-            return jsonify({'error': 'Request body must be JSON'}), 400
-
-        offset = body.get('offset', 5)
-        if not isinstance(offset, int) or offset < 0:
+        # Lấy offset từ query parameter thay vì body
+        offset = request.args.get('offset', type=int, default=0)
+        if offset is None or offset < 0:
             return jsonify({'error': 'Offset must be a non-negative integer'}), 400
 
-        num_items = 5
+        num_items = 5  # Mỗi lần gọi API sẽ lấy thêm 5 sản phẩm
 
         if len(search_results['top_indices']) == 0:
             return jsonify({'error': 'No previous search results found. Please run a search first.'}), 400
@@ -204,13 +201,17 @@ def load_more_similar():
         if offset >= len(top_indices):
             return jsonify({'error': 'No more products to load'}), 404
 
+        # Lấy 5 sản phẩm tiếp theo
         similar_products = get_products_from_indices(
             top_indices, class_paths, class_sources, similarities, data, start_idx=offset, num_items=num_items
         )
 
+        # Tính offset tiếp theo
+        next_offset = offset + num_items if offset + num_items < len(top_indices) else None
+
         return jsonify({
             'similar_products': similar_products,
-            'next_offset': offset + num_items if offset + num_items < len(top_indices) else None,
+            'next_offset': next_offset,
             'total_results': len(top_indices)
         })
 
@@ -279,6 +280,87 @@ def add_product():
 
     except Exception as e:
         return jsonify({'error': f'Failed to add product: {str(e)}'}), 500
+
+# API sửa sản phẩm
+@app.route('/api/update-product', methods=['POST'])
+def update_product():
+    try:
+        # Lấy product_id
+        product_id = request.form.get('product_id', type=int)
+        if not product_id:
+            return jsonify({'error': 'Missing product_id'}), 400
+
+        # Chỉ cho phép cập nhật các trường sau
+        product_name = request.form.get('product_name')
+        price = request.form.get('price')
+        unit = request.form.get('unit')
+
+        # Kiểm tra có ít nhất một trường cần cập nhật
+        if not any([product_name, price, unit]):
+            return jsonify({'error': 'No valid fields to update (product_name, price, unit only)'}), 400
+
+        # Kết nối DB
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Tạo truy vấn cập nhật động
+        update_fields = []
+        values = []
+
+        if product_name:
+            update_fields.append("product_name = %s")
+            values.append(product_name)
+        if price:
+            update_fields.append("price = %s")
+            values.append(price)
+        if unit:
+            update_fields.append("unit = %s")
+            values.append(unit)
+
+        values.append(product_id)
+
+        update_query = f"""
+            UPDATE products
+            SET {', '.join(update_fields)}
+            WHERE id = %s
+        """
+
+        cursor.execute(update_query, values)
+        conn.commit()
+        conn.close()
+
+        return jsonify({'message': 'Product updated successfully'})
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to update product: {str(e)}'}), 500
+
+# API xóa sản phẩm
+@app.route('/api/delete-product', methods=['POST'])
+def delete_product():
+    try:
+        product_id = request.form.get('product_id', type=int)
+        if not product_id:
+            return jsonify({'error': 'Missing product_id'}), 400
+
+        # Kết nối DB
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Kiểm tra sản phẩm tồn tại
+        cursor.execute("SELECT * FROM products WHERE id = %s", (product_id,))
+        product = cursor.fetchone()
+        if not product:
+            return jsonify({'error': 'Product not found'}), 404
+
+        # Xóa sản phẩm
+        cursor.execute("DELETE FROM products WHERE id = %s", (product_id,))
+        conn.commit()
+        conn.close()
+
+        return jsonify({'message': 'Product deleted successfully'})
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to delete product: {str(e)}'}), 500
 
 # Upload ảnh
 @app.route('/api/upload-image', methods=['POST'])
