@@ -457,6 +457,27 @@ def get_products():
 
     except Exception as e:
         return jsonify({'error': f'Failed to retrieve products: {str(e)}'}), 500
+    
+# API lấy danh sách danh mục
+@app.route('/api/get-categories', methods=['GET'])
+def get_category():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        query = """
+            SELECT *
+            FROM categories
+        """
+        cursor.execute(query)
+        categories = cursor.fetchall()
+
+        conn.close()
+
+        return jsonify({'categories': categories})
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to retrieve products: {str(e)}'}), 500 
 # ----- Thực thi -----
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0', port=5000)
