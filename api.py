@@ -443,8 +443,9 @@ def get_products():
         cursor = conn.cursor(dictionary=True)
 
         query = """
-            SELECT *
-            FROM products
+            SELECT *, c.name as category_name
+            FROM products p
+            JOIN categories c ON p.category_id = c.id
             ORDER BY product_id DESC
             LIMIT %s OFFSET %s
         """
