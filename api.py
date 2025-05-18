@@ -431,6 +431,32 @@ def update_features_and_finetune(image_path, label, image_path_in_db, category_i
 
     fine_tune_model_with_new_data([image_path], [category_id])
 
+# get products
+@app.route('/api/get-products', methods=['GET'])
+def get_products():
+    try:
+        # Lấy offset từ query parameter, mặc định là 0
+        offset = int(request.args.get('offset', 0))
+        limit = 5  # Số lượng sản phẩm mỗi lần load
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        query = """
+            SELECT *
+            FROM products
+            ORDER BY product_id DESC
+            LIMIT %s OFFSET %s
+        """
+        cursor.execute(query, (limit, offset))
+        products = cursor.fetchall()
+
+        conn.close()
+
+        return jsonify({'products': products})
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to retrieve products: {str(e)}'}), 500
 # ----- Thực thi -----
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0', port=5000)
