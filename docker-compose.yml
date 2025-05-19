@@ -2,7 +2,10 @@ version: '3.8'
 
 services:
   web:
-    build: .
+    build:
+      context: .
+      args:
+        ENV: ${ENV}          # Truyền biến ENV vào Dockerfile
     container_name: api_hango_app
     restart: always
     ports:
@@ -10,7 +13,9 @@ services:
     volumes:
       - .:/app
     env_file:
-      - .env
+      - .env                 # Load biến môi trường
+    environment:
+      - ENV=${ENV}          # Export ENV cho app nếu cần
 
   nginx:
     image: nginx:alpine
