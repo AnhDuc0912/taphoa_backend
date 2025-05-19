@@ -28,7 +28,7 @@ def get_db_connection():
 # ----- Cấu hình -----
 IMAGE_DATA = './static'
 DB_CONFIG = {
-    'host': 'localhost',
+    'host': 'host.docker.internal',
     'user': 'root',
     'password': 'mysql',
     'database': 'taphoa_hango'
