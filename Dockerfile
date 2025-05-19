@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y \
 COPY . /app
 
 # Copy requirements và cài thư viện Python
-COPY app/requirements.txt /app/requirements.txt
+COPY ./requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Mở cổng Flask
