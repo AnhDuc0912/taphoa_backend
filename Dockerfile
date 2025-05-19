@@ -1,9 +1,19 @@
-# Dockerfile
-FROM python:3.11-slim
+# Sử dụng image Python chính thức
+FROM python:3.10-slim
 
+# Đặt thư mục làm việc trong container
 WORKDIR /app
 
-COPY app/ /app
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy toàn bộ nội dung hiện tại vào container
+COPY . /app
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
+# Cài đặt pip packages (nếu có file requirements)
+# Nếu không có, bạn có thể bỏ qua dòng này
+# RUN pip install -r requirements.txt
+RUN pip install flask torch joblib
+
+# Mở cổng 5000 (thường dùng cho Flask)
+EXPOSE 5000
+
+# Lệnh chạy app
+CMD ["python", "api.py"]
