@@ -7,6 +7,8 @@ import torch
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import requests
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=".env.production") 
 
 app = Flask(__name__)
 
@@ -28,10 +30,10 @@ def get_db_connection():
 # ----- Cấu hình -----
 IMAGE_DATA = os.getenv('IMAGE_DATA', './static')
 DB_CONFIG = {
-    'host': '192.168.100.111',
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', 'mysql'),
-    'database': os.getenv('DB_NAME', 'taphoa_hango')
+    'host': os.getenv('DB_HOST'),
+    'user': os.getenv('DB_USER'),
+    'password': os.getenv('DB_PASSWORD'),
+    'database': os.getenv('DB_NAME')
 }
 
 # ----- Hàm lấy sản phẩm từ top_indices -----
