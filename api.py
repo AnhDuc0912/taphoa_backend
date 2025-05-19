@@ -26,12 +26,12 @@ def get_db_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
 # ----- Cấu hình -----
-IMAGE_DATA = './static'
+IMAGE_DATA = os.getenv('IMAGE_DATA', './static')
 DB_CONFIG = {
-    'host': 'host.docker.internal',
-    'user': 'root',
-    'password': 'mysql',
-    'database': 'taphoa_hango'
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'user': os.getenv('DB_USER', 'root'),
+    'password': os.getenv('DB_PASSWORD', 'mysql'),
+    'database': os.getenv('DB_NAME', 'taphoa_hango')
 }
 
 # ----- Hàm lấy sản phẩm từ top_indices -----
