@@ -10,7 +10,7 @@ COPY . /app
 # Cài đặt pip packages (nếu có file requirements)
 # Nếu không có, bạn có thể bỏ qua dòng này
 # RUN pip install -r requirements.txt
-RUN pip install flask torch joblib
+RUN pip install flask torch joblib mysql-connector-python
 
 # Mở cổng 5000 (thường dùng cho Flask)
 EXPOSE 5000
