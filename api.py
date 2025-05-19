@@ -28,7 +28,7 @@ def get_db_connection():
 # ----- Cấu hình -----
 IMAGE_DATA = os.getenv('IMAGE_DATA', './static')
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
+    'host': '192.168.100.111',
     'user': os.getenv('DB_USER', 'root'),
     'password': os.getenv('DB_PASSWORD', 'mysql'),
     'database': os.getenv('DB_NAME', 'taphoa_hango')
