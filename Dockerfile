@@ -1,19 +1,28 @@
-# Sử dụng image Python chính thức
-FROM python:3.10-slim
+# Sử dụng base image Python nhẹ và phù hợp cho PyTorch
+FROM python:3.9-slim
 
-# Đặt thư mục làm việc trong container
+# Tạo thư mục làm việc
 WORKDIR /app
 
-# Copy toàn bộ nội dung hiện tại vào container
+# Cài đặt các thư viện hệ thống cần thiết
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy toàn bộ thư mục mã nguồn vào container
 COPY . /app
 
-# Cài đặt pip packages (nếu có file requirements)
-# Nếu không có, bạn có thể bỏ qua dòng này
-# RUN pip install -r requirements.txt
-RUN pip install flask torch joblib mysql-connector-python
+# Copy requirements và cài thư viện Python
+COPY app/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Mở cổng 5000 (thường dùng cho Flask)
+# Mở cổng Flask
 EXPOSE 5000
 
-# Lệnh chạy app
+# Chạy Flask app
 CMD ["python", "api.py"]
